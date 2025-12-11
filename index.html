@@ -1,274 +1,498 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Menu, Users, Shuffle, UserCheck, ChevronDown, Check, ArrowLeft, RefreshCw, Layers } from 'lucide-react';
-
-const App = () => {
-  const [screen, setScreen] = useState('setup'); // 'setup' | 'matches'
-  
-  // 設定ステート
-  const [playerCount, setPlayerCount] = useState(10);
-  const [courtCount, setCourtCount] = useState(1);
-  const [isShuffle, setIsShuffle] = useState(false);
-  
-  // 試合データステート
-  const [matches, setMatches] = useState([]);
-  const [completedMatches, setCompletedMatches] = useState({}); // { matchId: boolean }
-
-  // ---------------------------------------------------------
-  // ロジック: スケジュール生成（循環・キュー方式）
-  // ---------------------------------------------------------
-  const generateSchedule = () => {
-    // 1. プレイヤーIDのリスト作成 (待ち行列)
-    // 例: [1, 2, 3, ..., 10]
-    let queue = Array.from({ length: playerCount }, (_, i) => ({
-      id: i + 1
-    }));
-
-    // シャッフル機能: 最初だけ順番を混ぜる（オプション）
-    if (isShuffle) {
-      queue = queue.sort(() => Math.random() - 0.5);
-    }
-
-    const generatedMatches = [];
-    const totalGamesToGenerate = 30; // 30試合分先読み作成
-    let currentMatchId = 1;
-
-    // シミュレーション開始
-    // Reactのstateではなくローカル変数でキューを回す
-    let tempQueue = [...queue];
-
-    for (let i = 0; i < totalGamesToGenerate; i++) {
-      // 1. キューの先頭から4人取り出す
-      // 人数が足りない場合でも、強引に先頭に戻ってループさせる（補填ロジック）
-      if (tempQueue.length < 4) {
-        // 万が一キューが枯渇するようなバグ回避のための安全策（通常ありえないが）
-        tempQueue = [...tempQueue, ...queue]; 
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ダブルス組み合わせ表</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel (JSX変換用) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+      body { font-family: sans-serif; }
+      .modal-open { overflow: hidden; }
+      /* アニメーション */
+      @keyframes fadeIn {
+        from { opacity: 0; transform: scale(0.95); }
+        to { opacity: 1; transform: scale(1); }
       }
-      
-      const p1 = tempQueue.shift();
-      const p2 = tempQueue.shift();
-      const p3 = tempQueue.shift();
-      const p4 = tempQueue.shift();
+      .animate-fade-in {
+        animation: fadeIn 0.15s ease-out forwards;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
 
-      // 2. 試合を作成 (p1, p2) vs (p3, p4)
-      generatedMatches.push({
-        id: currentMatchId++,
-        team1: [p1.id, p2.id],
-        team2: [p3.id, p4.id],
-      });
+    <script type="text/babel">
+      const { useState, useEffect, useRef } = React;
 
-      // 3. 試合した4人をキューの最後尾に戻す
-      // 【ポイント】「少しずつずらす」ために、戻す順番を入れ替える
-      // そのまま [p1, p2, p3, p4] で戻すと、ペアが固定化されてしまうため、
-      // [p1, p3, p2, p4] のようにクロスさせて戻すことで、次回の組み合わせをずらす。
-      tempQueue.push(p1);
-      tempQueue.push(p3); // ここで入れ替え
-      tempQueue.push(p2); // ここで入れ替え
-      tempQueue.push(p4);
-    }
+      // ---------------------------------------------------------
+      // アイコン
+      // ---------------------------------------------------------
+      const MenuIcon = ({ size = 24, className = "" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+      );
+      const Users = ({ size = 24, className = "" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      );
+      const Shuffle = ({ size = 24, className = "" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l14.2-12.7c.8-1.1 2-1.7 3.4-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.7.9 3.4 2.2l2.6 3.3c.8 1.4 2 2.2 3.4 2.2H22"/><path d="m18 22 4-4-4-4"/></svg>
+      );
+      const Check = ({ size = 24, strokeWidth = 2, className = "" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="20 6 9 17 4 12"/></svg>
+      );
+      const ChevronDown = ({ size = 24, className = "" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m6 9 6 6 6-6"/></svg>
+      );
+      const RefreshCw = ({ size = 24, className = "" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+      );
+      const Layers = ({ size = 24, className = "" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+      );
+      const X = ({ size = 24, className = "" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      );
+      const Plus = ({ size = 24, className = "" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+      );
+      const Minus = ({ size = 24, className = "" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+      );
+      const Trash2 = ({ size = 24, className = "" }) => (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+      );
 
-    setMatches(generatedMatches);
-    setCompletedMatches({});
-    setScreen('matches');
-  };
+      // ---------------------------------------------------------
+      // アプリ本体
+      // ---------------------------------------------------------
+      const App = () => {
+        const [screen, setScreen] = useState('setup'); 
+        const [showMenu, setShowMenu] = useState(false);
+        const [resetConfirmMode, setResetConfirmMode] = useState(false); // リセット確認用フラグ
+        
+        // 設定ステート
+        const [playerCount, setPlayerCount] = useState(10);
+        const [courtCount, setCourtCount] = useState(1);
+        const [isShuffle, setIsShuffle] = useState(false);
+        
+        // 試合データ
+        const [matches, setMatches] = useState([]);
+        const [completedMatches, setCompletedMatches] = useState({});
 
-  const toggleMatchCompletion = (id) => {
-    setCompletedMatches(prev => ({
-      ...prev,
-      [id]: !prev[id]
-    }));
-  };
+        useEffect(() => {
+          try {
+            const savedCount = localStorage.getItem('bm_playerCount');
+            if (savedCount) setPlayerCount(parseInt(savedCount));
+          } catch(e) {}
+        }, []);
 
-  const resetApp = () => {
-    setScreen('setup');
-    setMatches([]);
-  };
+        useEffect(() => {
+           try {
+            localStorage.setItem('bm_playerCount', playerCount);
+           } catch(e) {}
+        }, [playerCount]);
 
-  // ---------------------------------------------------------
-  // コンポーネント: Setup Screen (ホーム画面)
-  // ---------------------------------------------------------
-  if (screen === 'setup') {
-    return (
-      <div className="min-h-screen bg-gray-100 font-sans text-gray-800">
-        {/* Header */}
-        <header className="bg-gray-700 text-white p-4 flex justify-between items-center shadow-md">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-green-400 border border-white"></div>
-            <h1 className="font-bold text-lg">ダブルス組み合わせ表</h1>
-          </div>
-          <button className="p-1 rounded hover:bg-gray-600">
-            <Menu size={24} />
-          </button>
-        </header>
+        // ----------------------------------------------------------------
+        // 試合生成ロジック
+        // ----------------------------------------------------------------
+        const createMatches = (startMatchId, numMatches, count, shouldShuffle, customQueue = null) => {
+          // キューの初期化
+          let queue;
+          if (customQueue) {
+            queue = [...customQueue];
+          } else {
+            // 新規作成時はID順
+            queue = Array.from({ length: count }, (_, i) => ({ id: i + 1 }));
+            if (shouldShuffle) queue.sort(() => Math.random() - 0.5);
+          }
 
-        {/* Main Content */}
-        <main className="p-4 flex flex-col items-center pt-10">
-          <div className="w-full max-w-md bg-white rounded-lg shadow-lg border-t-4 border-green-600 p-6 space-y-8">
+          const newMatches = [];
+          // キューのコピーを使ってシミュレーション
+          let tempQueue = [...queue];
+
+          for (let i = 0; i < numMatches; i++) {
+            if (tempQueue.length < 4) break;
             
-            {/* 参加人数 */}
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 font-bold text-lg">
-                <Users size={20} />
-                参加人数を入力してください
-              </label>
-              <input
-                type="number"
-                min="4"
-                max="100"
-                value={playerCount}
-                onChange={(e) => setPlayerCount(Math.max(0, parseInt(e.target.value) || 0))}
-                placeholder="4〜40"
-                className="w-full text-2xl p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-center font-bold text-gray-700"
-              />
-            </div>
+            // 4人取り出す
+            const p1 = tempQueue.shift();
+            const p2 = tempQueue.shift();
+            const p3 = tempQueue.shift();
+            const p4 = tempQueue.shift();
 
-            {/* オプション */}
-            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 text-sm text-blue-800">
-              <div className="flex items-start gap-2">
-                <Layers size={18} className="mt-0.5 shrink-0" />
-                <p>
-                  <strong>順番通りモード:</strong><br/>
-                  1番から順に試合を組み、終わった人は列の最後尾に並び直します。その際、毎回ペアが変わるように自動的に順序を少しずらして並び直します。
-                </p>
-              </div>
-            </div>
+            // ペア組みのパターン
+            let team1, team2;
 
-            <div className="space-y-4 pl-1">
-              <label className="flex items-center gap-3 cursor-pointer select-none">
-                <div className={`w-6 h-6 border-2 rounded flex items-center justify-center transition-colors ${isShuffle ? 'bg-green-600 border-green-600' : 'border-gray-300'}`}>
-                   {isShuffle && <Check size={16} className="text-white" />}
-                </div>
-                <input 
-                  type="checkbox" 
-                  className="hidden" 
-                  checked={isShuffle} 
-                  onChange={(e) => setIsShuffle(e.target.checked)} 
-                />
-                <span className="text-lg font-medium flex items-center gap-2">
-                  <Shuffle size={18} /> 最初の番号をシャッフル
-                </span>
-              </label>
-            </div>
+            if (shouldShuffle) {
+              // シャッフルモード
+              const pool = [p1, p2, p3, p4].sort(() => Math.random() - 0.5);
+              team1 = [pool[0].id, pool[1].id];
+              team2 = [pool[2].id, pool[3].id];
+            } else {
+              // 順番通りモード: 試合ごとにペアをローテーション
+              const pattern = i % 3; 
+              if (pattern === 0) {
+                team1 = [p1.id, p2.id];
+                team2 = [p3.id, p4.id];
+              } else if (pattern === 1) {
+                team1 = [p1.id, p3.id];
+                team2 = [p2.id, p4.id];
+              } else {
+                team1 = [p1.id, p4.id];
+                team2 = [p2.id, p3.id];
+              }
+            }
 
-            {/* コート数 */}
-            <div className="flex items-center gap-4">
-              <span className="text-lg font-bold flex items-center gap-2">
-                <div className="border border-black rounded px-1 py-0.5 text-xs">□</div> 
-                コート数
-              </span>
-              <div className="relative flex-1">
-                <select
-                  value={courtCount}
-                  onChange={(e) => setCourtCount(parseInt(e.target.value))}
-                  className="w-full appearance-none bg-white border border-gray-300 px-4 py-2 pr-8 rounded text-lg font-medium focus:outline-none focus:ring-2 focus:ring-green-500"
-                >
-                  {[1, 2, 3, 4, 5, 6, 7, 8].map(num => (
-                    <option key={num} value={num}>{num}面</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-3 text-gray-500 pointer-events-none" size={18} />
-              </div>
-            </div>
+            newMatches.push({
+              id: startMatchId + i,
+              team1: team1,
+              team2: team2,
+            });
 
-            {/* Go Button */}
-            <button
-              onClick={generateSchedule}
-              disabled={playerCount < 4}
-              className={`w-full py-4 rounded-lg text-white font-bold text-2xl shadow-md transition-transform active:scale-95 ${
-                playerCount < 4 ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-700 hover:bg-green-800'
-              }`}
-            >
-              Go!
-            </button>
+            // 4人を最後尾に戻す
+            tempQueue.push(p1);
+            tempQueue.push(p2);
+            tempQueue.push(p3);
+            tempQueue.push(p4);
+          }
+          return newMatches;
+        };
 
-          </div>
-        </main>
-      </div>
-    );
-  }
+        // 新規スタート
+        const generateSchedule = () => {
+          const newMatches = createMatches(1, 30, playerCount, isShuffle);
+          setMatches(newMatches);
+          setCompletedMatches({});
+          setScreen('matches');
+          setShowMenu(false);
+          window.scrollTo(0, 0);
+        };
 
-  // ---------------------------------------------------------
-  // コンポーネント: Match List Screen (対戦表画面)
-  // ---------------------------------------------------------
-  return (
-    <div className="min-h-screen bg-gray-100 font-sans text-gray-800">
-      {/* Header */}
-      <header className="bg-gray-700 text-white p-3 flex justify-between items-center shadow-md sticky top-0 z-20">
-        <div className="flex items-center gap-3">
-          <div className="w-3 h-3 rounded-full bg-green-400 border border-white"></div>
-          <h1 className="font-bold text-base sm:text-lg truncate">ダブルス組み合わせ表</h1>
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="font-bold flex items-center gap-1">
-             <Users size={16} /> {playerCount}人
-          </span>
-          <button onClick={resetApp} className="p-1 hover:bg-gray-600 rounded">
-            <Menu size={24} />
-          </button>
-        </div>
-      </header>
+        // ----------------------------------------------------------------
+        // 途中組み替えロジック
+        // ----------------------------------------------------------------
+        const updateSchedule = () => {
+          // 1. 完了している試合のみを残す
+          const keptMatches = matches.filter(m => completedMatches[m.id]);
+          
+          // 2. 残った試合から、各プレイヤーの「現在の試合数」をカウント
+          const playCounts = {};
+          for (let i = 1; i <= playerCount; i++) playCounts[i] = 0;
+          
+          keptMatches.forEach(m => {
+            [...m.team1, ...m.team2].forEach(pId => {
+              if (pId <= playerCount) {
+                playCounts[pId] = (playCounts[pId] || 0) + 1;
+              }
+            });
+          });
 
-      {/* List */}
-      <main className="p-2 sm:p-4 max-w-xl mx-auto pb-20">
-        <div className="space-y-3">
-          {matches.map((match) => {
-            const isDone = completedMatches[match.id];
+          // 3. 次の待ち行列を作成 (試合数が少ない順に並べる)
+          let newQueue = Array.from({ length: playerCount }, (_, i) => ({ id: i + 1 }));
+          
+          newQueue.sort((a, b) => {
+            const countA = playCounts[a.id] || 0;
+            const countB = playCounts[b.id] || 0;
             
-            return (
-              <div key={match.id} className="flex items-center gap-2 sm:gap-4 select-none">
-                {/* Match Number */}
-                <div className="w-6 sm:w-8 text-center font-bold text-xl text-black">
-                  {match.id}
-                </div>
+            // 試合数が違うなら、少ない人が先頭（優先）
+            if (countA !== countB) return countA - countB;
+            
+            // 試合数が同じ場合の並び順
+            if (isShuffle) return Math.random() - 0.5;
+            return a.id - b.id;
+          });
 
-                {/* Cards Container */}
-                <div className="flex-1 flex gap-1 sm:gap-2">
-                  {/* Team 1 (Green) */}
-                  <div className="flex-1 flex gap-1 p-1 border-2 border-green-600 rounded-lg bg-white shadow-sm">
-                    {match.team1.map((playerId, idx) => (
-                      <div key={idx} className="flex-1 aspect-[3/4] flex items-center justify-center border border-gray-200 rounded bg-white">
-                        <span className="text-xl sm:text-3xl font-black text-black">{playerId}</span>
-                      </div>
-                    ))}
-                  </div>
+          // 4. 次の試合IDを決定
+          const nextMatchId = keptMatches.length > 0 
+            ? keptMatches[keptMatches.length - 1].id + 1 
+            : 1;
 
-                  {/* Team 2 (Blue) */}
-                  <div className="flex-1 flex gap-1 p-1 border-2 border-blue-500 rounded-lg bg-white shadow-sm">
-                    {match.team2.map((playerId, idx) => (
-                      <div key={idx} className="flex-1 aspect-[3/4] flex items-center justify-center border border-gray-200 rounded bg-white">
-                        <span className="text-xl sm:text-3xl font-black text-black">{playerId}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+          // 5. 新しいキューを使って続きを生成
+          const addedMatches = createMatches(nextMatchId, 30, playerCount, isShuffle, newQueue);
 
-                {/* Checkbox */}
-                <button 
-                  onClick={() => toggleMatchCompletion(match.id)}
-                  className={`w-8 h-8 sm:w-10 sm:h-10 rounded-md border-2 flex items-center justify-center transition-all ${
-                    isDone 
-                      ? 'bg-gray-600 border-gray-600 text-white' 
-                      : 'bg-white border-gray-400 text-transparent hover:border-gray-600'
-                  }`}
-                >
-                  <Check size={24} strokeWidth={4} />
+          // 6. 結合して更新
+          setMatches([...keptMatches, ...addedMatches]);
+          setShowMenu(false);
+        };
+
+        const toggleMatchCompletion = (id) => {
+          setCompletedMatches(prev => ({
+            ...prev,
+            [id]: !prev[id]
+          }));
+        };
+
+        const resetApp = () => {
+          setScreen('setup');
+          setMatches([]);
+          setCompletedMatches({});
+          setShowMenu(false);
+          setResetConfirmMode(false);
+        };
+
+        // ---------------------------------------------------------
+        // メニューモーダル
+        // ---------------------------------------------------------
+        const MenuModal = () => (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setShowMenu(false)}></div>
+            <div className="relative bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-fade-in">
+              <div className="bg-gray-100 p-4 flex justify-between items-center border-b">
+                <h3 className="font-bold text-lg text-gray-700">メニュー</h3>
+                <button onClick={() => setShowMenu(false)} className="p-1 rounded-full hover:bg-gray-200">
+                  <X size={20} />
                 </button>
               </div>
-            );
-          })}
-        </div>
-        
-        <div className="mt-8 text-center">
-             <button 
-               onClick={generateSchedule}
-               className="bg-gray-200 text-gray-600 px-6 py-2 rounded-full font-bold text-sm hover:bg-gray-300 flex items-center gap-2 mx-auto"
-             >
-               <RefreshCw size={16} />
-               表を再生成する
-             </button>
-        </div>
-      </main>
-    </div>
-  );
-};
+              
+              <div className="p-4 space-y-6">
+                
+                {/* 途中変更エリア */}
+                {screen === 'matches' && (
+                  <div className="space-y-3 pb-6 border-b border-gray-100">
+                    <h4 className="font-bold text-sm text-gray-500 flex items-center gap-2">
+                      <Users size={16} /> 人数を変更して続きを作成
+                    </h4>
+                    <div className="bg-blue-50 p-4 rounded-lg space-y-4 border border-blue-100">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-gray-700">現在の人数</span>
+                        <div className="flex items-center gap-3">
+                          <button 
+                            onClick={() => setPlayerCount(Math.max(4, playerCount - 1))}
+                            className="w-8 h-8 flex items-center justify-center bg-white rounded-full border shadow-sm active:scale-95 text-blue-600"
+                          >
+                            <Minus size={18} />
+                          </button>
+                          <span className="text-xl font-bold w-8 text-center text-gray-800">{playerCount}</span>
+                          <button 
+                            onClick={() => setPlayerCount(playerCount + 1)}
+                            className="w-8 h-8 flex items-center justify-center bg-white rounded-full border shadow-sm active:scale-95 text-blue-600"
+                          >
+                            <Plus size={18} />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-blue-600">
+                        完了済みの試合はそのまま残し、これまでの試合数が少ない人が優先されるように続きを作成します。
+                      </p>
+                      <button 
+                        onClick={updateSchedule}
+                        className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 active:scale-95 transition-colors shadow-sm"
+                      >
+                        変更を反映して再生成
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-export default App;
+                {/* リセットボタン (2段階確認) */}
+                <div>
+                  {!resetConfirmMode ? (
+                    <button 
+                      onClick={() => setResetConfirmMode(true)}
+                      className="w-full border-2 border-gray-200 text-gray-600 font-bold py-3 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Trash2 size={18} />
+                      最初からやり直す
+                    </button>
+                  ) : (
+                    <div className="flex gap-2 animate-fade-in">
+                      <button 
+                        onClick={() => setResetConfirmMode(false)}
+                        className="flex-1 bg-gray-200 text-gray-700 font-bold py-3 rounded-lg hover:bg-gray-300"
+                      >
+                        キャンセル
+                      </button>
+                      <button 
+                        onClick={resetApp}
+                        className="flex-1 bg-red-500 text-white font-bold py-3 rounded-lg hover:bg-red-600 shadow-md"
+                      >
+                        OK! リセット
+                      </button>
+                    </div>
+                  )}
+                  {resetConfirmMode && (
+                    <p className="text-center text-red-500 text-xs mt-2 font-bold">
+                      ※この操作は取り消せません
+                    </p>
+                  )}
+                </div>
+
+              </div>
+            </div>
+          </div>
+        );
+
+        // ---------------------------------------------------------
+        // 画面: 設定 (Setup)
+        // ---------------------------------------------------------
+        if (screen === 'setup') {
+          return (
+            <div className="min-h-screen bg-gray-100 font-sans text-gray-800">
+              <header className="bg-gray-700 text-white p-4 flex justify-between items-center shadow-md">
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full bg-green-400 border border-white"></div>
+                  <h1 className="font-bold text-lg">ダブルス組み合わせ表</h1>
+                </div>
+              </header>
+
+              <main className="p-4 flex flex-col items-center pt-10">
+                <div className="w-full max-w-md bg-white rounded-lg shadow-lg border-t-4 border-green-600 p-6 space-y-8">
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 font-bold text-lg">
+                      <Users size={20} />
+                      参加人数を入力してください
+                    </label>
+                    <input
+                      type="number"
+                      min="4"
+                      max="100"
+                      value={playerCount}
+                      onChange={(e) => setPlayerCount(Math.max(0, parseInt(e.target.value) || 0))}
+                      placeholder="4〜40"
+                      className="w-full text-2xl p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-center font-bold text-gray-700"
+                    />
+                  </div>
+                  <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 text-sm text-blue-800">
+                    <div className="flex items-start gap-2">
+                      <Layers size={18} className="mt-0.5 shrink-0" />
+                      <p>
+                        <strong>順番通りモード:</strong><br/>
+                        シャッフルをOFFにすると、ランダムではなく一定の法則でペアを組みます。
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-4 pl-1">
+                    <label className="flex items-center gap-3 cursor-pointer select-none">
+                      <div className={`w-6 h-6 border-2 rounded flex items-center justify-center transition-colors ${isShuffle ? 'bg-green-600 border-green-600' : 'border-gray-300'}`}>
+                         {isShuffle && <Check size={16} className="text-white" />}
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        className="hidden" 
+                        checked={isShuffle} 
+                        onChange={(e) => setIsShuffle(e.target.checked)} 
+                      />
+                      <span className="text-lg font-medium flex items-center gap-2">
+                        <Shuffle size={18} /> 最初の番号をシャッフル
+                      </span>
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-lg font-bold flex items-center gap-2">
+                      <div className="border border-black rounded px-1 py-0.5 text-xs">□</div> 
+                      コート数
+                    </span>
+                    <div className="relative flex-1">
+                      <select
+                        value={courtCount}
+                        onChange={(e) => setCourtCount(parseInt(e.target.value))}
+                        className="w-full appearance-none bg-white border border-gray-300 px-4 py-2 pr-8 rounded text-lg font-medium focus:outline-none focus:ring-2 focus:ring-green-500"
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map(num => (
+                          <option key={num} value={num}>{num}面</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-3 text-gray-500 pointer-events-none" size={18} />
+                    </div>
+                  </div>
+                  <button
+                    onClick={generateSchedule}
+                    disabled={playerCount < 4}
+                    className={`w-full py-4 rounded-lg text-white font-bold text-2xl shadow-md transition-transform active:scale-95 ${
+                      playerCount < 4 ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-700 hover:bg-green-800'
+                    }`}
+                  >
+                    Go!
+                  </button>
+                </div>
+              </main>
+            </div>
+          );
+        }
+
+        // ---------------------------------------------------------
+        // 画面: 試合一覧 (Matches)
+        // ---------------------------------------------------------
+        return (
+          <div className="min-h-screen bg-gray-100 font-sans text-gray-800 pb-20">
+            {showMenu && <MenuModal />}
+            <header className="bg-gray-700 text-white p-3 flex justify-between items-center shadow-md sticky top-0 z-20">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-green-400 border border-white"></div>
+                <h1 className="font-bold text-base sm:text-lg truncate">ダブルス組み合わせ表</h1>
+              </div>
+              <div className="flex items-center gap-4">
+                <span className="font-bold flex items-center gap-1">
+                   <Users size={16} /> {playerCount}人
+                </span>
+                <button 
+                  onClick={() => {
+                    setResetConfirmMode(false);
+                    setShowMenu(true);
+                  }} 
+                  className="p-1 hover:bg-gray-600 rounded active:bg-gray-500"
+                >
+                  <MenuIcon size={24} />
+                </button>
+              </div>
+            </header>
+            <main className="p-2 sm:p-4 max-w-xl mx-auto">
+              <div className="space-y-3">
+                {matches.map((match) => {
+                  const isDone = completedMatches[match.id];
+                  return (
+                    <div key={match.id} className="flex items-center gap-2 sm:gap-4 select-none">
+                      <div className={`w-6 sm:w-8 text-center font-bold text-xl ${isDone ? 'text-gray-400' : 'text-black'}`}>
+                        {match.id}
+                      </div>
+                      <div className={`flex-1 flex gap-1 sm:gap-2 transition-opacity ${isDone ? 'opacity-50' : 'opacity-100'}`}>
+                        <div className={`flex-1 flex gap-1 p-1 border-2 rounded-lg bg-white shadow-sm ${isDone ? 'border-gray-300' : 'border-green-600'}`}>
+                          {match.team1.map((playerId, idx) => (
+                            <div key={idx} className="flex-1 aspect-[3/4] flex items-center justify-center border border-gray-200 rounded bg-white">
+                              <span className="text-xl sm:text-3xl font-black text-black">{playerId}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className={`flex-1 flex gap-1 p-1 border-2 rounded-lg bg-white shadow-sm ${isDone ? 'border-gray-300' : 'border-blue-500'}`}>
+                          {match.team2.map((playerId, idx) => (
+                            <div key={idx} className="flex-1 aspect-[3/4] flex items-center justify-center border border-gray-200 rounded bg-white">
+                              <span className="text-xl sm:text-3xl font-black text-black">{playerId}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => toggleMatchCompletion(match.id)}
+                        className={`w-8 h-8 sm:w-10 sm:h-10 rounded-md border-2 flex items-center justify-center transition-all ${
+                          isDone 
+                            ? 'bg-gray-500 border-gray-500 text-white' 
+                            : 'bg-white border-gray-400 text-transparent hover:border-gray-600'
+                        }`}
+                      >
+                        <Check size={24} strokeWidth={4} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-12 text-center text-gray-400 text-sm">
+                   <p>右上のメニューボタンから<br/>人数変更やリセットができます</p>
+              </div>
+            </main>
+          </div>
+        );
+      };
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+  </body>
+</html>
